@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "parser.hpp"
+#include "utils.hpp"
 int main() {
     std::string line;
     std::getline(std::cin, line);
