@@ -1,48 +1,102 @@
-#include "utils.hpp"
-#include <algorithm>
+#include "lexer.hpp"
 #include <cctype>
-#include <cmath>
-#include <sstream>
-#include <iomanip>
-#include <set>
 #include <stdexcept>
 
-std::string to_lower_copy(std::string s) {
-    for (char& c : s) {
+Lexer::Lexer(const std::string& input) : s(input), pos(0) {}
+
+void Lexer::skip_spaces() { //метод скипа пробелов
+    while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) {
+        pos++;
+    }
+}
+
+Token Lexer::read_number() {
+    size_t start = pos;
+
+    if (s[pos] == '0') {
+        pos++;
+
+        if (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+            throw std::runtime_error("Invalid number");
+        }
+
+        if (pos < s.size() && s[pos] == '.') {
+            pos++;
+
+            if (pos >= s.size() || !std::isdigit(static_cast<unsigned char>(s[pos]))) {
+                throw std::runtime_error("Invalid number");
+            }
+
+            while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+                pos++;
+            }
+        }
+
+        return {lexem_t::NUMBER, s.substr(start, pos - start)};
+    }
+
+    while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+        pos++;
+    }
+
+    if (pos < s.size() && s[pos] == '.') {
+        pos++;
+
+        if (pos >= s.size() || !std::isdigit(static_cast<unsigned char>(s[pos]))) {
+            throw std::runtime_error("Invalid number");
+        }
+
+        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+            pos++;
+        }
+    }
+
+    return {lexem_t::NUMBER, s.substr(start, pos - start)};
+}
+
+Token Lexer::read_identifier() {
+    size_t start = pos;
+
+    while (pos < s.size() &&
+           (std::isalnum(static_cast<unsigned char>(s[pos])) || s[pos] == '_')) {
+        pos++;
+    }
+
+    std::string val = s.substr(start, pos - start);
+
+    for (char& c : val) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
-    return s;
+
+    return {lexem_t::IDENT, val};
 }
 
-bool is_builtin_function(const std::string& s) {
-    static const std::set<std::string> funcs = {
-        "sin", "cos", "tan",
-        "asin", "acos", "atan",
-        "exp", "log", "sqrt"
-    };
-    return funcs.count(to_lower_copy(s)) > 0;
-}
+Token Lexer::next() {
+    skip_spaces();
 
-std::string number_to_string(double x) {
-    if (std::fabs(x) < 1e-12) x = 0.0;
-
-    std::ostringstream out;
-    out << std::setprecision(15) << x;
-    std::string s = out.str();
-
-    if (s.find('.') != std::string::npos) {
-        while (!s.empty() && s.back() == '0') s.pop_back();
-        if (!s.empty() && s.back() == '.') s.pop_back();
+    if (pos >= s.size()) {
+        return {lexem_t::EOEX, ""};
     }
 
-    if (s == "-0") s = "0";
-    if (s.empty()) s = "0";
+    char c = s[pos];
 
-    return s;
-}
-
-void ensure_finite(double x, const std::string& msg) {
-    if (std::isnan(x) || std::isinf(x)) {
-        throw std::runtime_error(msg);
+    if (std::isdigit(static_cast<unsigned char>(c))) {
+        return read_number();
     }
+
+    if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+        return read_identifier();
+    }
+
+    if (c == '+' || c == '-' || c == '*' || c == '/' || c == '^') {
+        pos++;
+        return {lexem_t::OP, std::string(1, c)};
+    }
+
+    if (c == '(' || c == ')') {
+        pos++;
+        return {lexem_t::PAREN, std::string(1, c)};
+    }
+
+    throw std::runtime_error("Unknown symbol");
 }
