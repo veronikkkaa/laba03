@@ -1,102 +1,131 @@
-#include "lexer.hpp"
-#include <cctype>
+#include "parser.hpp"
+#include "utils.hpp"
 #include <stdexcept>
 
-Lexer::Lexer(const std::string& input) : s(input), pos(0) {}
-
-void Lexer::skip_spaces() { 
-    while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) {
-        pos++;
-    }
+Parser::Parser(const std::string& expression, const std::set<std::string>& variables)
+    : lexer(expression), allowed_vars(variables) {
+    next_token();
 }
 
-Token Lexer::read_number() {
-    size_t start = pos;
+void Parser::next_token() {
+    current = lexer.next();
+}
 
-    if (s[pos] == '0') {
-        pos++;
+bool Parser::is_op(const std::string& op) const {
+    return current.type == lexem_t::OP && current.value == op;
+}
 
-        if (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
-            throw std::runtime_error("Invalid number");
-        }
+bool Parser::is_paren(const std::string& p) const {
+    return current.type == lexem_t::PAREN && current.value == p;
+}
 
-        if (pos < s.size() && s[pos] == '.') {
-            pos++;
+NodePtr Parser::parse_expression() {
+    NodePtr value = parse_term();
 
-            if (pos >= s.size() || !std::isdigit(static_cast<unsigned char>(s[pos]))) {
-                throw std::runtime_error("Invalid number");
+    while (is_op("+") || is_op("-")) {
+        std::string op = current.value;
+        next_token();
+        NodePtr rhs = parse_term();
+        value = std::make_shared<BinaryNode>(op, value, rhs);
+    }
+
+    return value;
+}
+
+NodePtr Parser::parse_term() {
+    NodePtr value = parse_unary();
+
+    while (is_op("*") || is_op("/")) {
+        std::string op = current.value;
+        next_token();
+        NodePtr rhs = parse_unary();
+        value = std::make_shared<BinaryNode>(op, value, rhs);
+    }
+
+    return value;
+}
+
+NodePtr Parser::parse_unary() {
+    if (is_op("+")) {
+        next_token();
+        return parse_unary();
+    }
+
+    if (is_op("-")) {
+        next_token();
+        return std::make_shared<UnaryNode>("-", parse_unary());
+    }
+
+    return parse_power();
+}
+
+NodePtr Parser::parse_power() {
+    NodePtr left = parse_primary();
+
+    if (is_op("^")) {
+        next_token();
+        NodePtr right = parse_unary();
+        return std::make_shared<BinaryNode>("^", left, right);
+    }
+
+    return left;
+}
+
+NodePtr Parser::parse_primary() {
+    if (current.type == lexem_t::NUMBER) {
+        double value = std::stod(current.value);
+        next_token();
+        return std::make_shared<NumberNode>(value);
+    }
+
+    if (current.type == lexem_t::IDENT) {
+        std::string name = current.value;
+        next_token();
+
+        if (is_paren("(")) {
+            if (!is_builtin_function(name)) {
+                throw std::runtime_error("Unknown function: " + name);
             }
 
-            while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
-                pos++;
+            next_token();
+            NodePtr arg = parse_expression();
+
+            if (!is_paren(")")) {
+                throw std::runtime_error("Expected )");
             }
+
+            next_token();
+            return std::make_shared<FunctionNode>(name, arg);
         }
 
-        return {lexem_t::NUMBER, s.substr(start, pos - start)};
-    }
-
-    while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
-        pos++;
-    }
-
-    if (pos < s.size() && s[pos] == '.') {
-        pos++;
-
-        if (pos >= s.size() || !std::isdigit(static_cast<unsigned char>(s[pos]))) {
-            throw std::runtime_error("Invalid number");
+        if (!allowed_vars.count(name)) {
+            throw std::runtime_error("Unknown variable: " + name);
         }
 
-        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
-            pos++;
-        }
+        return std::make_shared<VariableNode>(name);
     }
 
-    return {lexem_t::NUMBER, s.substr(start, pos - start)};
+    if (is_paren("(")) {
+        next_token();
+        NodePtr value = parse_expression();
+
+        if (!is_paren(")")) {
+            throw std::runtime_error("Expected )");
+        }
+
+        next_token();
+        return value;
+    }
+
+    throw std::runtime_error("Bad expression");
 }
 
-Token Lexer::read_identifier() {
-    size_t start = pos;
+NodePtr Parser::parse() {
+    NodePtr result = parse_expression();
 
-    while (pos < s.size() &&
-           (std::isalnum(static_cast<unsigned char>(s[pos])) || s[pos] == '_')) {
-        pos++;
+    if (current.type != lexem_t::EOEX) {
+        throw std::runtime_error("Extra tokens");
     }
 
-    std::string val = s.substr(start, pos - start);
-
-    for (char& c : val) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-
-    return {lexem_t::IDENT, val};
-}
-
-Token Lexer::next() {
-    skip_spaces();
-
-    if (pos >= s.size()) {
-        return {lexem_t::EOEX, ""};
-    }
-
-    char c = s[pos];
-
-    if (std::isdigit(static_cast<unsigned char>(c))) {
-        return read_number();
-    }
-
-    if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
-        return read_identifier();
-    }
-
-    if (c == '+' || c == '-' || c == '*' || c == '/' || c == '^') {
-        pos++;
-        return {lexem_t::OP, std::string(1, c)};
-    }
-
-    if (c == '(' || c == ')') {
-        pos++;
-        return {lexem_t::PAREN, std::string(1, c)};
-    }
-
-    throw std::runtime_error("Unknown symbol");
+    return result;
 }
