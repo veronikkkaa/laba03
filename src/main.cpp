@@ -1,3 +1,12 @@
+#include <iostream>
+#include <sstream>
+#include <vector>
+#include <map>
+#include <set>
+#include <string>
+#include <stdexcept>
+
+#include "parser.hpp"
 int main() {
     std::string line;
     std::getline(std::cin, line);
