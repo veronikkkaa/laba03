@@ -2,6 +2,7 @@
 
 #include <set>
 #include <string>
+
 #include "lexer.hpp"
 #include "ast.hpp"
 
@@ -9,7 +10,7 @@ class Parser {
 private:
     Lexer lexer;
     Token current;
-    std::set<std::string> allowed_vars; 
+    std::set<std::string> allowed_vars;
 
     void next_token();
 
