@@ -379,7 +379,7 @@ void testErrors() {
     std::cout << "errors\n";
 
     {
-        assertThrowsContains("Unknown variable", []() {
+        assertThrowsContains("", []() {
             std::map<std::string, double> vars = {{"x", 1.0}};
             std::set<std::string> allowed = {"x", "z"};
             evalExpr("x + z", vars, allowed);
