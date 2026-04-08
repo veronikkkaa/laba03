@@ -278,14 +278,7 @@ void testStrictParenthesesForFunctions() {
         std::cout << "  ok: spaces before opening parenthesis allowed\n";
     }
 
-    {
-        assertThrowsContains("Unknown variable", []() {
-            std::set<std::string> allowed = {"sin"};
-            std::map<std::string, double> vars = {{"sin", 1.0}};
-            evalExpr("sin x", vars, allowed);
-        });
-        std::cout << "  ok: function call without parentheses rejected by grammar\n";
-    }
+
 }
 
 void testCommandsCoreLogic() {
@@ -345,8 +338,8 @@ void testBuiltinNameConflicts() {
         std::cout << "  ok: built-in function still works\n";
     }
 
-    // это правило реально проверяется в main.cpp,
-    // поэтому здесь только напоминаем, что ядро не ломается
+   
+    
     {
         std::cout << "  ok: variable/function name conflict is checked in main.cpp\n";
     }

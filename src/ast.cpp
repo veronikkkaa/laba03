@@ -655,10 +655,7 @@ NodePtr BinaryNode::simplify() const {
         if (rn && is_one(rn->value)) {
             return l;
         }
-        // ВАЖНО:
-        // не упрощаем 0 / expr -> 0
-        // не упрощаем expr / expr -> 1
-        // это ломает область определения при expr = 0
+        
     }
 
     if (op == "^") {
