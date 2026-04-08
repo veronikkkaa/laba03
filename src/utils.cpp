@@ -2,19 +2,19 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <iomanip>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 std::string to_lower_copy(const std::string& s) {
     std::string result = s;
-
     std::transform(result.begin(), result.end(), result.begin(),
                    [](unsigned char c) {
                        return static_cast<char>(std::tolower(c));
                    });
-
     return result;
 }
 
@@ -30,7 +30,6 @@ bool is_builtin_function(const std::string& name) {
 
 std::string number_to_string(double value) {
     std::ostringstream out;
-
     out << std::setprecision(10) << value;
 
     std::string s = out.str();
@@ -44,9 +43,15 @@ std::string number_to_string(double value) {
         }
     }
 
-    if (s.empty()) {
+    if (s.empty() || s == "-0") {
         return "0";
     }
 
     return s;
+}
+
+void ensure_finite(double value, const std::string& message) {
+    if (!std::isfinite(value)) {
+        throw std::runtime_error(message);
+    }
 }
