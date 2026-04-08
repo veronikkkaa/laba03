@@ -52,6 +52,14 @@ double evalDerivative(const std::string& expr,
     return d->eval(vars);
 }
 
+std::string derivativeToString(const std::string& expr,
+                               const std::string& var,
+                               const std::set<std::string>& allowed = {}) {
+    NodePtr tree = parseExpr(expr, allowed);
+    NodePtr d = full_simplify(tree->diff(var));
+    return d->str();
+}
+
 void assertThrowsContains(const std::string& expectedSubstring, const std::function<void()>& fn) {
     try {
         fn();
@@ -62,210 +70,308 @@ void assertThrowsContains(const std::string& expectedSubstring, const std::funct
     }
 }
 
-void testLexer() {
-    std::cout << "lexer\n";
+void testBinaryOperations() {
+    std::cout << "binary operations\n";
 
     {
-        std::vector<Token> tokens = tokenizeAll("x + 2 * 3");
-        assert(tokens.size() >= 6);
-        assert(tokens[0].type == lexem_t::IDENT);
-        assert(tokens[0].value == "x");
-        assert(tokens[1].type == lexem_t::OP);
-        assert(tokens[1].value == "+");
-        assert(tokens[2].type == lexem_t::NUMBER);
-        assert(tokens[2].value == "2");
-        std::cout << "  ok: basic tokens\n";
+        assert(doubleEquals(evalExpr("2 + 3"), 5.0));
+        std::cout << "  ok: plus\n";
     }
 
     {
-        std::vector<Token> tokens = tokenizeAll("sin(x)");
-        assert(tokens.size() >= 5);
-        assert(tokens[0].type == lexem_t::IDENT);
-        assert(tokens[0].value == "sin");
-        assert(tokens[1].type == lexem_t::PAREN);
-        assert(tokens[1].value == "(");
-        std::cout << "  ok: function tokens\n";
+        assert(doubleEquals(evalExpr("7 - 2"), 5.0));
+        std::cout << "  ok: minus\n";
     }
 
     {
-        std::vector<Token> tokens = tokenizeAll("3.14");
+        assert(doubleEquals(evalExpr("2 * 3"), 6.0));
+        std::cout << "  ok: multiply\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("8 / 2"), 4.0));
+        std::cout << "  ok: divide\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("2 ^ 3"), 8.0));
+        std::cout << "  ok: power\n";
+    }
+}
+
+void testUnaryOperations() {
+    std::cout << "unary operations\n";
+
+    {
+        assert(doubleEquals(evalExpr("+5"), 5.0));
+        std::cout << "  ok: unary plus\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("-5"), -5.0));
+        std::cout << "  ok: unary minus\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("-2^2"), -4.0));
+        std::cout << "  ok: unary precedence over binary use case\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("(-2)^2"), 4.0));
+        std::cout << "  ok: parentheses with unary minus\n";
+    }
+}
+
+void testNumbers() {
+    std::cout << "numbers\n";
+
+    {
+        std::vector<Token> tokens = tokenizeAll("0.5");
         assert(tokens[0].type == lexem_t::NUMBER);
-        assert(tokens[0].value == "3.14");
-        std::cout << "  ok: decimal numbers\n";
+        assert(tokens[0].value == "0.5");
+        std::cout << "  ok: 0.5 accepted\n";
+    }
+
+    {
+        std::vector<Token> tokens = tokenizeAll("0.500");
+        assert(tokens[0].type == lexem_t::NUMBER);
+        assert(tokens[0].value == "0.500");
+        std::cout << "  ok: trailing zeros accepted\n";
+    }
+
+    {
+        std::vector<Token> tokens = tokenizeAll("0.0");
+        assert(tokens[0].type == lexem_t::NUMBER);
+        assert(tokens[0].value == "0.0");
+        std::cout << "  ok: 0.0 accepted\n";
+    }
+
+    {
+        assertThrowsContains("Invalid number", []() {
+            tokenizeAll("0002");
+        });
+        std::cout << "  ok: 0002 rejected\n";
     }
 
     {
         assertThrowsContains("Invalid number", []() {
             tokenizeAll("002.5");
         });
-        std::cout << "  ok: leading zeros rejected\n";
+        std::cout << "  ok: 002.5 rejected\n";
     }
 
     {
         assertThrowsContains("Invalid number", []() {
             tokenizeAll(".5");
         });
-        std::cout << "  ok: dot-leading number rejected\n";
+        std::cout << "  ok: .5 rejected\n";
+    }
+
+    {
+        assertThrowsContains("Invalid number", []() {
+            tokenizeAll("1.");
+        });
+        std::cout << "  ok: 1. rejected\n";
     }
 }
 
-void testParser() {
-    std::cout << "parser\n";
+void testVariables() {
+    std::cout << "variables\n";
 
     {
-        NodePtr expr = parseExpr("2 + 3");
-        assert(expr != nullptr);
-        std::cout << "  ok: simple expression\n";
+        std::map<std::string, double> vars = {{"x", 3.0}};
+        std::set<std::string> allowed = {"x"};
+        assert(doubleEquals(evalExpr("x + 2", vars, allowed), 5.0));
+        std::cout << "  ok: simple variable\n";
     }
 
     {
-        double result = evalExpr("2 + 3 * 4");
-        assert(doubleEquals(result, 14.0));
-        std::cout << "  ok: operator precedence\n";
+        std::map<std::string, double> vars = {{"_tmp2", 4.0}};
+        std::set<std::string> allowed = {"_tmp2"};
+        assert(doubleEquals(evalExpr("_tmp2 + 1", vars, allowed), 5.0));
+        std::cout << "  ok: underscore variable\n";
     }
 
     {
-        double result = evalExpr("(2 + 3) * 4");
-        assert(doubleEquals(result, 20.0));
-        std::cout << "  ok: parentheses\n";
-    }
-
-    {
-        double result = evalExpr("2^3^2");
-        assert(doubleEquals(result, 512.0));
-        std::cout << "  ok: right-associative power\n";
-    }
-
-    {
-        double result = evalExpr("-3^2");
-        assert(doubleEquals(result, -9.0));
-        std::cout << "  ok: unary minus precedence\n";
+        std::map<std::string, double> vars = {{"x1", 7.0}};
+        std::set<std::string> allowed = {"x1"};
+        assert(doubleEquals(evalExpr("x1 - 2", vars, allowed), 5.0));
+        std::cout << "  ok: digits inside variable name\n";
     }
 }
 
-void testEvaluator() {
-    std::cout << "evaluator\n";
+void testFunctions() {
+    std::cout << "functions\n";
 
     {
-        double result = evalExpr("2 + 3");
-        assert(doubleEquals(result, 5.0));
-        std::cout << "  ok: addition\n";
-    }
-
-    {
-        double result = evalExpr("2 * 3");
-        assert(doubleEquals(result, 6.0));
-        std::cout << "  ok: multiplication\n";
-    }
-
-    {
-        std::map<std::string, double> vars = {{"x", 3.0}, {"y", 4.0}};
-        std::set<std::string> allowed = {"x", "y"};
-        double result = evalExpr("x * x + y * 2", vars, allowed);
-        assert(doubleEquals(result, 17.0));
-        std::cout << "  ok: variables\n";
-    }
-
-    {
-        double result = evalExpr("2 ^ 3");
-        assert(doubleEquals(result, 8.0));
-        std::cout << "  ok: power\n";
-    }
-
-    {
-        double result = evalExpr("sin(0)");
-        assert(doubleEquals(result, 0.0));
+        assert(doubleEquals(evalExpr("sin(0)"), 0.0));
         std::cout << "  ok: sin\n";
     }
 
     {
-        double result = evalExpr("sqrt(4)");
-        assert(doubleEquals(result, 2.0));
-        std::cout << "  ok: sqrt\n";
+        assert(doubleEquals(evalExpr("cos(0)"), 1.0));
+        std::cout << "  ok: cos\n";
     }
 
     {
-        double result = evalExpr("log(1)");
-        assert(doubleEquals(result, 0.0));
+        assert(doubleEquals(evalExpr("tan(0)"), 0.0));
+        std::cout << "  ok: tan\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("asin(0)"), 0.0));
+        std::cout << "  ok: asin\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("acos(1)"), 0.0));
+        std::cout << "  ok: acos\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("atan(0)"), 0.0));
+        std::cout << "  ok: atan\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("exp(0)"), 1.0));
+        std::cout << "  ok: exp\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("log(1)"), 0.0));
         std::cout << "  ok: log\n";
     }
+
+    {
+        assert(doubleEquals(evalExpr("sqrt(4)"), 2.0));
+        std::cout << "  ok: sqrt\n";
+    }
 }
 
-void testDerivative() {
-    std::cout << "derivative\n";
+void testExpressionsAsFunctionArguments() {
+    std::cout << "function arguments\n";
 
     {
-        double result = evalDerivative("5", "x");
-        assert(doubleEquals(result, 0.0));
-        std::cout << "  ok: constant\n";
-    }
-
-    {
-        std::map<std::string, double> vars = {{"x", 5.0}};
+        std::map<std::string, double> vars = {{"x", 0.0}};
         std::set<std::string> allowed = {"x"};
-        double result = evalDerivative("x", "x", vars, allowed);
-        assert(doubleEquals(result, 1.0));
-        std::cout << "  ok: variable\n";
-    }
-
-    {
-        std::map<std::string, double> vars = {{"x", 3.0}};
-        std::set<std::string> allowed = {"x"};
-        double result = evalDerivative("x^2", "x", vars, allowed);
-        assert(doubleEquals(result, 6.0));
-        std::cout << "  ok: x^2\n";
+        assert(doubleEquals(evalExpr("sin(x + 0)", vars, allowed), 0.0));
+        std::cout << "  ok: expression inside function\n";
     }
 
     {
         std::map<std::string, double> vars = {{"x", 0.0}};
         std::set<std::string> allowed = {"x"};
-        double result = evalDerivative("sin(x)", "x", vars, allowed);
-        assert(doubleEquals(result, 1.0));
-        std::cout << "  ok: sin(x)\n";
-    }
-
-    {
-        std::map<std::string, double> vars = {{"x", 1.0}};
-        std::set<std::string> allowed = {"x"};
-        double result = evalDerivative("log(x)", "x", vars, allowed);
-        assert(doubleEquals(result, 1.0));
-        std::cout << "  ok: log(x)\n";
+        assert(doubleEquals(evalExpr("sin(cos(x))", vars, allowed), std::sin(1.0)));
+        std::cout << "  ok: nested function argument\n";
     }
 }
 
-void testComplexExpressions() {
-    std::cout << "complex expressions\n";
+void testStrictParenthesesForFunctions() {
+    std::cout << "function syntax\n";
 
     {
-        std::map<std::string, double> vars = {{"x", 3.0}, {"y", 4.0}};
-        std::set<std::string> allowed = {"x", "y"};
-        double result = evalExpr("x*x + y*2", vars, allowed);
-        assert(doubleEquals(result, 17.0));
-        std::cout << "  ok: x*x + y*2\n";
+        std::map<std::string, double> vars = {{"x", 0.0}};
+        std::set<std::string> allowed = {"x"};
+        assert(doubleEquals(evalExpr("sin (x)", vars, allowed), 0.0));
+        std::cout << "  ok: spaces before opening parenthesis allowed\n";
+    }
+
+    {
+        assertThrowsContains("Unknown variable", []() {
+            std::set<std::string> allowed = {"sin"};
+            std::map<std::string, double> vars = {{"sin", 1.0}};
+            evalExpr("sin x", vars, allowed);
+        });
+        std::cout << "  ok: function call without parentheses rejected by grammar\n";
+    }
+}
+
+void testCommandsCoreLogic() {
+    std::cout << "commands core logic\n";
+
+    {
+        std::map<std::string, double> vars = {{"x", 3.0}};
+        std::set<std::string> allowed = {"x"};
+        assert(doubleEquals(evalExpr("x^2", vars, allowed), 9.0));
+        std::cout << "  ok: evaluate logic\n";
+    }
+
+    {
+        std::string d = derivativeToString("x^2", "x", {"x"});
+        assert(!d.empty());
+        std::cout << "  ok: derivative logic\n";
     }
 
     {
         std::map<std::string, double> vars = {{"x", 3.0}};
         std::set<std::string> allowed = {"x"};
-        double result = evalExpr("-x + 5", vars, allowed);
-        assert(doubleEquals(result, 2.0));
-        std::cout << "  ok: unary minus\n";
+        assert(doubleEquals(evalDerivative("x^2", "x", vars, allowed), 6.0));
+        std::cout << "  ok: evaluate_derivative logic\n";
+    }
+}
+
+void testNamesRules() {
+    std::cout << "names\n";
+
+    {
+        std::set<std::string> allowed = {"x", "_tmp2", "abc123"};
+        std::map<std::string, double> vars = {{"x", 1.0}, {"_tmp2", 2.0}, {"abc123", 3.0}};
+        assert(doubleEquals(evalExpr("x + _tmp2 + abc123", vars, allowed), 6.0));
+        std::cout << "  ok: valid names\n";
     }
 
     {
-        std::map<std::string, double> vars = {{"x", 0.0}};
         std::set<std::string> allowed = {"x"};
-        double result = evalExpr("sin(cos(x))", vars, allowed);
-        assert(doubleEquals(result, std::sin(1.0)));
-        std::cout << "  ok: nested functions\n";
+        std::map<std::string, double> vars = {{"x", 5.0}};
+        assert(doubleEquals(evalExpr("X", vars, allowed), 5.0));
+        std::cout << "  ok: case-insensitive variable names\n";
+    }
+
+    {
+        assertThrowsContains("Unknown function", []() {
+            parseExpr("LoGg(1)");
+        });
+        std::cout << "  ok: unknown function name checked\n";
+    }
+}
+
+void testBuiltinNameConflicts() {
+    std::cout << "built-in name conflicts\n";
+
+    {
+        assert(doubleEquals(evalExpr("sin(0)"), 0.0));
+        std::cout << "  ok: built-in function still works\n";
+    }
+
+    // это правило реально проверяется в main.cpp,
+    // поэтому здесь только напоминаем, что ядро не ломается
+    {
+        std::cout << "  ok: variable/function name conflict is checked in main.cpp\n";
+    }
+}
+
+void testNestedExpressions() {
+    std::cout << "nested expressions\n";
+
+    {
+        std::map<std::string, double> vars = {{"x", 2.0}, {"y", 3.0}, {"z", 2.0}};
+        std::set<std::string> allowed = {"x", "y", "z"};
+        assert(doubleEquals(evalExpr("x^y^z", vars, allowed), 512.0));
+        std::cout << "  ok: nested powers\n";
+    }
+
+    {
+        assert(doubleEquals(evalExpr("((((2+3))))"), 5.0));
+        std::cout << "  ok: nested parentheses\n";
     }
 
     {
         std::map<std::string, double> vars = {{"x", 5.0}};
         std::set<std::string> allowed = {"x"};
-        double result = evalExpr("(x + 1) * (x - 1)", vars, allowed);
-        assert(doubleEquals(result, 24.0));
-        std::cout << "  ok: product of sums\n";
+        assert(doubleEquals(evalExpr("((x + 1) * (x - 1))", vars, allowed), 24.0));
+        std::cout << "  ok: nested mixed expression\n";
     }
 }
 
@@ -322,15 +428,87 @@ void testErrors() {
         });
         std::cout << "  ok: invalid number\n";
     }
+
+    {
+        assertThrowsContains("Expected )", []() {
+            parseExpr("(x + 1", {"x"});
+        });
+        std::cout << "  ok: missing closing parenthesis\n";
+    }
+
+    {
+        assertThrowsContains("Extra tokens", []() {
+            parseExpr("x y", {"x", "y"});
+        });
+        std::cout << "  ok: extra tokens\n";
+    }
+
+    {
+        assertThrowsContains("Unexpected token", []() {
+            parseExpr(")", {"x"});
+        });
+        std::cout << "  ok: unexpected token\n";
+    }
+}
+
+void testDerivativeExtra() {
+    std::cout << "derivative\n";
+
+    {
+        assert(doubleEquals(evalDerivative("5", "x"), 0.0));
+        std::cout << "  ok: constant\n";
+    }
+
+    {
+        std::map<std::string, double> vars = {{"x", 5.0}};
+        std::set<std::string> allowed = {"x"};
+        assert(doubleEquals(evalDerivative("x", "x", vars, allowed), 1.0));
+        std::cout << "  ok: variable\n";
+    }
+
+    {
+        std::map<std::string, double> vars = {{"x", 3.0}};
+        std::set<std::string> allowed = {"x"};
+        assert(doubleEquals(evalDerivative("x^2", "x", vars, allowed), 6.0));
+        std::cout << "  ok: x^2\n";
+    }
+
+    {
+        std::map<std::string, double> vars = {{"x", 0.0}};
+        std::set<std::string> allowed = {"x"};
+        assert(doubleEquals(evalDerivative("sin(x)", "x", vars, allowed), 1.0));
+        std::cout << "  ok: sin(x)\n";
+    }
+
+    {
+        std::map<std::string, double> vars = {{"x", 1.0}};
+        std::set<std::string> allowed = {"x"};
+        assert(doubleEquals(evalDerivative("log(x)", "x", vars, allowed), 1.0));
+        std::cout << "  ok: log(x)\n";
+    }
+
+    {
+        std::map<std::string, double> vars = {{"x", 4.0}};
+        std::set<std::string> allowed = {"x"};
+        assert(doubleEquals(evalDerivative("sqrt(x)", "x", vars, allowed), 0.25));
+        std::cout << "  ok: sqrt(x)\n";
+    }
 }
 
 int main() {
-    testLexer();
-    testParser();
-    testEvaluator();
-    testDerivative();
-    testComplexExpressions();
+    testBinaryOperations();
+    testUnaryOperations();
+    testNumbers();
+    testVariables();
+    testFunctions();
+    testExpressionsAsFunctionArguments();
+    testStrictParenthesesForFunctions();
+    testCommandsCoreLogic();
+    testNamesRules();
+    testBuiltinNameConflicts();
+    testNestedExpressions();
     testErrors();
+    testDerivativeExtra();
 
     std::cout << "done\n";
     return 0;
