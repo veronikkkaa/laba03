@@ -64,6 +64,7 @@ static void validate_variable_name(const std::string& name) {
     if (!is_valid_identifier(name)) {
         throw std::runtime_error("Invalid variable name: " + name);
     }
+
     if (is_builtin_function(name)) {
         throw std::runtime_error("Variable name conflicts with builtin function: " + name);
     }
@@ -265,7 +266,6 @@ int main() {
             throw std::runtime_error("Bad input");
         }
 
-        // inline-режим: команды через ;
         if (first_line.find(';') != std::string::npos) {
             std::vector<std::string> requests = split_by_semicolon(first_line);
             if (requests.empty()) {
@@ -279,10 +279,10 @@ int main() {
                     std::cout << '\n';
                 }
             }
+
             return 0;
         }
 
-        // базовый многострочный режим
         Request req = parse_multiline_request(std::cin, first_line);
         std::cout << execute_request(req);
     } catch (const std::exception& e) {
