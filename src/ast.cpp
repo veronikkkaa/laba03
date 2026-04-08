@@ -5,6 +5,20 @@
 #include <stdexcept>
 #include <sstream>
 
+static constexpr double EPS = 1e-12;
+
+static bool is_zero(double x) {
+    return std::fabs(x) < EPS;
+}
+
+static bool is_one(double x) {
+    return std::fabs(x - 1.0) < EPS;
+}
+
+static bool is_minus_one(double x) {
+    return std::fabs(x + 1.0) < EPS;
+}
+
 static void print_prefix(std::ostream& out, const std::string& prefix, bool is_last) {
     out << prefix;
     out << (is_last ? "\\-" : "|-");
@@ -38,7 +52,7 @@ int NumberNode::prec() const {
 
 bool NumberNode::equals(const NodePtr& other) const {
     auto p = std::dynamic_pointer_cast<NumberNode>(other);
-    return p && std::fabs(value - p->value) < 1e-12;
+    return p && std::fabs(value - p->value) < EPS;
 }
 
 void NumberNode::pretty_print(std::ostream& out, const std::string& prefix, bool is_last) const {
@@ -86,12 +100,19 @@ UnaryNode::UnaryNode(const std::string& o, NodePtr c) : op(o), child(std::move(c
 
 double UnaryNode::eval(const std::map<std::string, double>& vars) const {
     double v = child->eval(vars);
-    if (op == "+") return v;
-    return -v;
+    if (op == "+") {
+        ensure_finite(v, "Domain error: unary plus");
+        return v;
+    }
+    double r = -v;
+    ensure_finite(r, "Domain error: unary minus");
+    return r;
 }
 
 NodePtr UnaryNode::diff(const std::string& var) const {
-    if (op == "+") return child->diff(var);
+    if (op == "+") {
+        return child->diff(var);
+    }
     return std::make_shared<UnaryNode>("-", child->diff(var));
 }
 
@@ -100,7 +121,9 @@ NodePtr UnaryNode::simplify() const {
     auto num = std::dynamic_pointer_cast<NumberNode>(c);
 
     if (num) {
-        if (op == "+") return std::make_shared<NumberNode>(num->value);
+        if (op == "+") {
+            return std::make_shared<NumberNode>(num->value);
+        }
         return std::make_shared<NumberNode>(-num->value);
     }
 
@@ -109,13 +132,17 @@ NodePtr UnaryNode::simplify() const {
         return un->child->simplify();
     }
 
-    if (op == "+") return c;
+    if (op == "+") {
+        return c;
+    }
     return std::make_shared<UnaryNode>(op, c);
 }
 
 std::string UnaryNode::str(int parent_prec) const {
     std::string res = op + child->str(prec());
-    if (prec() < parent_prec) return "(" + res + ")";
+    if (prec() < parent_prec) {
+        return "(" + res + ")";
+    }
     return res;
 }
 
@@ -139,25 +166,47 @@ FunctionNode::FunctionNode(const std::string& n, NodePtr a) : name(n), arg(std::
 double FunctionNode::eval(const std::map<std::string, double>& vars) const {
     double x = arg->eval(vars);
 
-    if (name == "sin") return std::sin(x);
-    if (name == "cos") return std::cos(x);
-    if (name == "tan") return std::tan(x);
+    if (name == "sin") {
+        double r = std::sin(x);
+        ensure_finite(r, "Domain error: sin");
+        return r;
+    }
+
+    if (name == "cos") {
+        double r = std::cos(x);
+        ensure_finite(r, "Domain error: cos");
+        return r;
+    }
+
+    if (name == "tan") {
+        double r = std::tan(x);
+        ensure_finite(r, "Domain error: tan");
+        return r;
+    }
 
     if (name == "asin") {
         if (x < -1.0 || x > 1.0) {
             throw std::runtime_error("Domain error: asin");
         }
-        return std::asin(x);
+        double r = std::asin(x);
+        ensure_finite(r, "Domain error: asin");
+        return r;
     }
 
     if (name == "acos") {
         if (x < -1.0 || x > 1.0) {
             throw std::runtime_error("Domain error: acos");
         }
-        return std::acos(x);
+        double r = std::acos(x);
+        ensure_finite(r, "Domain error: acos");
+        return r;
     }
 
-    if (name == "atan") return std::atan(x);
+    if (name == "atan") {
+        double r = std::atan(x);
+        ensure_finite(r, "Domain error: atan");
+        return r;
+    }
 
     if (name == "exp") {
         double r = std::exp(x);
@@ -169,14 +218,18 @@ double FunctionNode::eval(const std::map<std::string, double>& vars) const {
         if (x <= 0.0) {
             throw std::runtime_error("Domain error: log");
         }
-        return std::log(x);
+        double r = std::log(x);
+        ensure_finite(r, "Domain error: log");
+        return r;
     }
 
     if (name == "sqrt") {
         if (x < 0.0) {
             throw std::runtime_error("Domain error: sqrt");
         }
-        return std::sqrt(x);
+        double r = std::sqrt(x);
+        ensure_finite(r, "Domain error: sqrt");
+        return r;
     }
 
     throw std::runtime_error("Unknown function: " + name);
@@ -186,14 +239,21 @@ NodePtr FunctionNode::diff(const std::string& var) const {
     NodePtr d = arg->diff(var);
 
     if (name == "sin") {
-        return std::make_shared<BinaryNode>("*", std::make_shared<FunctionNode>("cos", arg), d);
-    }
-    if (name == "cos") {
         return std::make_shared<BinaryNode>("*",
-            std::make_shared<UnaryNode>("-", std::make_shared<FunctionNode>("sin", arg)),
+            std::make_shared<FunctionNode>("cos", arg),
             d
         );
     }
+
+    if (name == "cos") {
+        return std::make_shared<BinaryNode>("*",
+            std::make_shared<UnaryNode>("-",
+                std::make_shared<FunctionNode>("sin", arg)
+            ),
+            d
+        );
+    }
+
     if (name == "tan") {
         return std::make_shared<BinaryNode>("*",
             std::make_shared<BinaryNode>("/",
@@ -206,17 +266,22 @@ NodePtr FunctionNode::diff(const std::string& var) const {
             d
         );
     }
+
     if (name == "asin") {
         return std::make_shared<BinaryNode>("/",
             d,
             std::make_shared<FunctionNode>("sqrt",
                 std::make_shared<BinaryNode>("-",
                     std::make_shared<NumberNode>(1.0),
-                    std::make_shared<BinaryNode>("^", arg, std::make_shared<NumberNode>(2.0))
+                    std::make_shared<BinaryNode>("^",
+                        arg,
+                        std::make_shared<NumberNode>(2.0)
+                    )
                 )
             )
         );
     }
+
     if (name == "acos") {
         return std::make_shared<UnaryNode>("-",
             std::make_shared<BinaryNode>("/",
@@ -224,27 +289,43 @@ NodePtr FunctionNode::diff(const std::string& var) const {
                 std::make_shared<FunctionNode>("sqrt",
                     std::make_shared<BinaryNode>("-",
                         std::make_shared<NumberNode>(1.0),
-                        std::make_shared<BinaryNode>("^", arg, std::make_shared<NumberNode>(2.0))
+                        std::make_shared<BinaryNode>("^",
+                            arg,
+                            std::make_shared<NumberNode>(2.0)
+                        )
                     )
                 )
             )
         );
     }
+
     if (name == "atan") {
         return std::make_shared<BinaryNode>("/",
             d,
             std::make_shared<BinaryNode>("+",
                 std::make_shared<NumberNode>(1.0),
-                std::make_shared<BinaryNode>("^", arg, std::make_shared<NumberNode>(2.0))
+                std::make_shared<BinaryNode>("^",
+                    arg,
+                    std::make_shared<NumberNode>(2.0)
+                )
             )
         );
     }
+
     if (name == "exp") {
-        return std::make_shared<BinaryNode>("*", std::make_shared<FunctionNode>("exp", arg), d);
+        return std::make_shared<BinaryNode>("*",
+            std::make_shared<FunctionNode>("exp", arg),
+            d
+        );
     }
+
     if (name == "log") {
-        return std::make_shared<BinaryNode>("/", d, arg);
+        return std::make_shared<BinaryNode>("/",
+            d,
+            arg
+        );
     }
+
     if (name == "sqrt") {
         return std::make_shared<BinaryNode>("/",
             d,
@@ -265,21 +346,37 @@ NodePtr FunctionNode::simplify() const {
     if (an) {
         double x = an->value;
 
-        if (name == "sin") return std::make_shared<NumberNode>(std::sin(x));
-        if (name == "cos") return std::make_shared<NumberNode>(std::cos(x));
-        if (name == "tan") return std::make_shared<NumberNode>(std::tan(x));
+        if (name == "sin") {
+            return std::make_shared<NumberNode>(std::sin(x));
+        }
+
+        if (name == "cos") {
+            return std::make_shared<NumberNode>(std::cos(x));
+        }
+
+        if (name == "tan") {
+            double r = std::tan(x);
+            ensure_finite(r, "Domain error: tan");
+            return std::make_shared<NumberNode>(r);
+        }
 
         if (name == "asin") {
-            if (x < -1.0 || x > 1.0) throw std::runtime_error("Domain error: asin");
+            if (x < -1.0 || x > 1.0) {
+                throw std::runtime_error("Domain error: asin");
+            }
             return std::make_shared<NumberNode>(std::asin(x));
         }
 
         if (name == "acos") {
-            if (x < -1.0 || x > 1.0) throw std::runtime_error("Domain error: acos");
+            if (x < -1.0 || x > 1.0) {
+                throw std::runtime_error("Domain error: acos");
+            }
             return std::make_shared<NumberNode>(std::acos(x));
         }
 
-        if (name == "atan") return std::make_shared<NumberNode>(std::atan(x));
+        if (name == "atan") {
+            return std::make_shared<NumberNode>(std::atan(x));
+        }
 
         if (name == "exp") {
             double r = std::exp(x);
@@ -288,12 +385,16 @@ NodePtr FunctionNode::simplify() const {
         }
 
         if (name == "log") {
-            if (x <= 0.0) throw std::runtime_error("Domain error: log");
+            if (x <= 0.0) {
+                throw std::runtime_error("Domain error: log");
+            }
             return std::make_shared<NumberNode>(std::log(x));
         }
 
         if (name == "sqrt") {
-            if (x < 0.0) throw std::runtime_error("Domain error: sqrt");
+            if (x < 0.0) {
+                throw std::runtime_error("Domain error: sqrt");
+            }
             return std::make_shared<NumberNode>(std::sqrt(x));
         }
     }
@@ -327,21 +428,38 @@ double BinaryNode::eval(const std::map<std::string, double>& vars) const {
     double a = left->eval(vars);
     double b = right->eval(vars);
 
-    if (op == "+") return a + b;
-    if (op == "-") return a - b;
-    if (op == "*") return a * b;
+    if (op == "+") {
+        double r = a + b;
+        ensure_finite(r, "Domain error: addition");
+        return r;
+    }
+
+    if (op == "-") {
+        double r = a - b;
+        ensure_finite(r, "Domain error: subtraction");
+        return r;
+    }
+
+    if (op == "*") {
+        double r = a * b;
+        ensure_finite(r, "Domain error: multiplication");
+        return r;
+    }
 
     if (op == "/") {
-        if (std::fabs(b) < 1e-12) {
+        if (is_zero(b)) {
             throw std::runtime_error("Division by zero");
         }
-        return a / b;
+        double r = a / b;
+        ensure_finite(r, "Domain error: division");
+        return r;
     }
 
     if (op == "^") {
-        if (std::fabs(a) < 1e-12 && b < 0.0) {
+        if (is_zero(a) && b < 0.0) {
             throw std::runtime_error("Domain error: power");
         }
+
         double r = std::pow(a, b);
         ensure_finite(r, "Domain error: power");
         return r;
@@ -352,26 +470,51 @@ double BinaryNode::eval(const std::map<std::string, double>& vars) const {
 
 NodePtr BinaryNode::diff(const std::string& var) const {
     if (op == "+") {
-        return std::make_shared<BinaryNode>("+", left->diff(var), right->diff(var));
-    }
-    if (op == "-") {
-        return std::make_shared<BinaryNode>("-", left->diff(var), right->diff(var));
-    }
-    if (op == "*") {
         return std::make_shared<BinaryNode>("+",
-            std::make_shared<BinaryNode>("*", left->diff(var), right),
-            std::make_shared<BinaryNode>("*", left, right->diff(var))
+            left->diff(var),
+            right->diff(var)
         );
     }
+
+    if (op == "-") {
+        return std::make_shared<BinaryNode>("-",
+            left->diff(var),
+            right->diff(var)
+        );
+    }
+
+    if (op == "*") {
+        return std::make_shared<BinaryNode>("+",
+            std::make_shared<BinaryNode>("*",
+                left->diff(var),
+                right
+            ),
+            std::make_shared<BinaryNode>("*",
+                left,
+                right->diff(var)
+            )
+        );
+    }
+
     if (op == "/") {
         return std::make_shared<BinaryNode>("/",
             std::make_shared<BinaryNode>("-",
-                std::make_shared<BinaryNode>("*", left->diff(var), right),
-                std::make_shared<BinaryNode>("*", left, right->diff(var))
+                std::make_shared<BinaryNode>("*",
+                    left->diff(var),
+                    right
+                ),
+                std::make_shared<BinaryNode>("*",
+                    left,
+                    right->diff(var)
+                )
             ),
-            std::make_shared<BinaryNode>("^", right, std::make_shared<NumberNode>(2.0))
+            std::make_shared<BinaryNode>("^",
+                right,
+                std::make_shared<NumberNode>(2.0)
+            )
         );
     }
+
     if (op == "^") {
         auto rn = std::dynamic_pointer_cast<NumberNode>(right);
 
@@ -379,7 +522,10 @@ NodePtr BinaryNode::diff(const std::string& var) const {
             return std::make_shared<BinaryNode>("*",
                 std::make_shared<NumberNode>(rn->value),
                 std::make_shared<BinaryNode>("*",
-                    std::make_shared<BinaryNode>("^", left, std::make_shared<NumberNode>(rn->value - 1.0)),
+                    std::make_shared<BinaryNode>("^",
+                        left,
+                        std::make_shared<NumberNode>(rn->value - 1.0)
+                    ),
                     left->diff(var)
                 )
             );
@@ -388,9 +534,16 @@ NodePtr BinaryNode::diff(const std::string& var) const {
         return std::make_shared<BinaryNode>("*",
             std::make_shared<BinaryNode>("^", left, right),
             std::make_shared<BinaryNode>("+",
-                std::make_shared<BinaryNode>("*", right->diff(var), std::make_shared<FunctionNode>("log", left)),
-                std::make_shared<BinaryNode>("*", right,
-                    std::make_shared<BinaryNode>("/", left->diff(var), left)
+                std::make_shared<BinaryNode>("*",
+                    right->diff(var),
+                    std::make_shared<FunctionNode>("log", left)
+                ),
+                std::make_shared<BinaryNode>("*",
+                    right,
+                    std::make_shared<BinaryNode>("/",
+                        left->diff(var),
+                        left
+                    )
                 )
             )
         );
@@ -410,17 +563,37 @@ NodePtr BinaryNode::simplify() const {
         double a = ln->value;
         double b = rn->value;
 
-        if (op == "+") return std::make_shared<NumberNode>(a + b);
-        if (op == "-") return std::make_shared<NumberNode>(a - b);
-        if (op == "*") return std::make_shared<NumberNode>(a * b);
+        if (op == "+") {
+            double rr = a + b;
+            ensure_finite(rr, "Domain error: addition");
+            return std::make_shared<NumberNode>(rr);
+        }
+
+        if (op == "-") {
+            double rr = a - b;
+            ensure_finite(rr, "Domain error: subtraction");
+            return std::make_shared<NumberNode>(rr);
+        }
+
+        if (op == "*") {
+            double rr = a * b;
+            ensure_finite(rr, "Domain error: multiplication");
+            return std::make_shared<NumberNode>(rr);
+        }
 
         if (op == "/") {
-            if (std::fabs(b) < 1e-12) throw std::runtime_error("Division by zero");
-            return std::make_shared<NumberNode>(a / b);
+            if (is_zero(b)) {
+                throw std::runtime_error("Division by zero");
+            }
+            double rr = a / b;
+            ensure_finite(rr, "Domain error: division");
+            return std::make_shared<NumberNode>(rr);
         }
 
         if (op == "^") {
-            if (std::fabs(a) < 1e-12 && b < 0.0) throw std::runtime_error("Domain error: power");
+            if (is_zero(a) && b < 0.0) {
+                throw std::runtime_error("Domain error: power");
+            }
             double rr = std::pow(a, b);
             ensure_finite(rr, "Domain error: power");
             return std::make_shared<NumberNode>(rr);
@@ -428,48 +601,84 @@ NodePtr BinaryNode::simplify() const {
     }
 
     if (op == "+") {
-        if (ln && std::fabs(ln->value) < 1e-12) return r;
-        if (rn && std::fabs(rn->value) < 1e-12) return l;
-
+        if (ln && is_zero(ln->value)) {
+            return r;
+        }
+        if (rn && is_zero(rn->value)) {
+            return l;
+        }
         if (l->equals(r)) {
-            return std::make_shared<BinaryNode>("*", std::make_shared<NumberNode>(2.0), l)->simplify();
+            return std::make_shared<BinaryNode>("*",
+                std::make_shared<NumberNode>(2.0),
+                l
+            )->simplify();
         }
     }
 
     if (op == "-") {
-        if (rn && std::fabs(rn->value) < 1e-12) return l;
-        if (ln && std::fabs(ln->value) < 1e-12) return std::make_shared<UnaryNode>("-", r)->simplify();
-        if (l->equals(r)) return std::make_shared<NumberNode>(0.0);
+        if (rn && is_zero(rn->value)) {
+            return l;
+        }
+        if (ln && is_zero(ln->value)) {
+            return std::make_shared<UnaryNode>("-", r)->simplify();
+        }
+        if (l->equals(r)) {
+            return std::make_shared<NumberNode>(0.0);
+        }
     }
 
     if (op == "*") {
-        if ((ln && std::fabs(ln->value) < 1e-12) || (rn && std::fabs(rn->value) < 1e-12)) {
+        if ((ln && is_zero(ln->value)) || (rn && is_zero(rn->value))) {
             return std::make_shared<NumberNode>(0.0);
         }
-        if (ln && std::fabs(ln->value - 1.0) < 1e-12) return r;
-        if (rn && std::fabs(rn->value - 1.0) < 1e-12) return l;
-        if (ln && std::fabs(ln->value + 1.0) < 1e-12) return std::make_shared<UnaryNode>("-", r)->simplify();
-        if (rn && std::fabs(rn->value + 1.0) < 1e-12) return std::make_shared<UnaryNode>("-", l)->simplify();
-
+        if (ln && is_one(ln->value)) {
+            return r;
+        }
+        if (rn && is_one(rn->value)) {
+            return l;
+        }
+        if (ln && is_minus_one(ln->value)) {
+            return std::make_shared<UnaryNode>("-", r)->simplify();
+        }
+        if (rn && is_minus_one(rn->value)) {
+            return std::make_shared<UnaryNode>("-", l)->simplify();
+        }
         if (l->equals(r)) {
-            return std::make_shared<BinaryNode>("^", l, std::make_shared<NumberNode>(2.0))->simplify();
+            return std::make_shared<BinaryNode>("^",
+                l,
+                std::make_shared<NumberNode>(2.0)
+            )->simplify();
         }
     }
 
     if (op == "/") {
-        if (ln && std::fabs(ln->value) < 1e-12) return std::make_shared<NumberNode>(0.0);
-        if (rn && std::fabs(rn->value - 1.0) < 1e-12) return l;
-        if (l->equals(r)) return std::make_shared<NumberNode>(1.0);
+        if (rn && is_one(rn->value)) {
+            return l;
+        }
+        // ВАЖНО:
+        // не упрощаем 0 / expr -> 0
+        // не упрощаем expr / expr -> 1
+        // это ломает область определения при expr = 0
     }
 
     if (op == "^") {
-        if (rn && std::fabs(rn->value) < 1e-12) return std::make_shared<NumberNode>(1.0);
-        if (rn && std::fabs(rn->value - 1.0) < 1e-12) return l;
-        if (ln && std::fabs(ln->value - 1.0) < 1e-12) return std::make_shared<NumberNode>(1.0);
+        if (rn && is_zero(rn->value)) {
+            return std::make_shared<NumberNode>(1.0);
+        }
+        if (rn && is_one(rn->value)) {
+            return l;
+        }
+        if (ln && is_one(ln->value)) {
+            return std::make_shared<NumberNode>(1.0);
+        }
 
-        if (ln && std::fabs(ln->value) < 1e-12) {
-            if (rn && rn->value <= 0.0) throw std::runtime_error("Domain error: power");
-            return std::make_shared<NumberNode>(0.0);
+        if (ln && is_zero(ln->value)) {
+            if (rn && rn->value < 0.0) {
+                throw std::runtime_error("Domain error: power");
+            }
+            if (rn && rn->value > 0.0) {
+                return std::make_shared<NumberNode>(0.0);
+            }
         }
     }
 
@@ -484,18 +693,25 @@ std::string BinaryNode::str(int parent_prec) const {
         l = "(" + left->str() + ")";
     }
 
-    if (right->prec() < prec() || ((op == "-" || op == "/" || op == "^") && right->prec() == prec())) {
+    if (right->prec() < prec() ||
+        ((op == "-" || op == "/" || op == "^") && right->prec() == prec())) {
         r = "(" + right->str() + ")";
     }
 
     std::string res = l + " " + op + " " + r;
-    if (prec() < parent_prec) return "(" + res + ")";
+    if (prec() < parent_prec) {
+        return "(" + res + ")";
+    }
     return res;
 }
 
 int BinaryNode::prec() const {
-    if (op == "+" || op == "-") return 1;
-    if (op == "*" || op == "/") return 2;
+    if (op == "+" || op == "-") {
+        return 1;
+    }
+    if (op == "*" || op == "/") {
+        return 2;
+    }
     return 4;
 }
 
@@ -514,7 +730,7 @@ void BinaryNode::pretty_print(std::ostream& out, const std::string& prefix, bool
 }
 
 NodePtr full_simplify(NodePtr node) {
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < 20; ++i) {
         NodePtr next = node->simplify();
         if (next->str() == node->str()) {
             return next;
