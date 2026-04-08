@@ -1,6 +1,5 @@
 #include <cctype>
 #include <iostream>
-#include <iterator>
 #include <map>
 #include <set>
 #include <sstream>
@@ -53,19 +52,21 @@ static bool is_valid_identifier(const std::string& s) {
     return true;
 }
 
-static std::vector<std::string> split_lines(const std::string& input) {
-    std::vector<std::string> lines;
-    std::istringstream in(input);
-    std::string line;
-
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        lines.push_back(line);
+static void validate_command(const std::string& command) {
+    if (command != "evaluate" &&
+        command != "derivative" &&
+        command != "evaluate_derivative") {
+        throw std::runtime_error("Unsupported command");
     }
+}
 
-    return lines;
+static void validate_variable_name(const std::string& name) {
+    if (!is_valid_identifier(name)) {
+        throw std::runtime_error("Invalid variable name: " + name);
+    }
+    if (is_builtin_function(name)) {
+        throw std::runtime_error("Variable name conflicts with builtin function: " + name);
+    }
 }
 
 static std::vector<std::string> split_by_semicolon(const std::string& input) {
@@ -90,23 +91,6 @@ static std::vector<std::string> split_by_semicolon(const std::string& input) {
     }
 
     return result;
-}
-
-static void validate_command(const std::string& command) {
-    if (command != "evaluate" &&
-        command != "derivative" &&
-        command != "evaluate_derivative") {
-        throw std::runtime_error("Unsupported command");
-    }
-}
-
-static void validate_variable_name(const std::string& name) {
-    if (!is_valid_identifier(name)) {
-        throw std::runtime_error("Invalid variable name: " + name);
-    }
-    if (is_builtin_function(name)) {
-        throw std::runtime_error("Variable name conflicts with builtin function: " + name);
-    }
 }
 
 static Request parse_inline_request(const std::string& text) {
@@ -157,33 +141,23 @@ static Request parse_inline_request(const std::string& text) {
     return req;
 }
 
-static Request parse_multiline_request(const std::string& input) {
-    std::vector<std::string> lines = split_lines(input);
-    size_t pos = 0;
-
-    auto next_nonempty_line = [&]() -> std::string {
-        while (pos < lines.size() && trim(lines[pos]).empty()) {
-            ++pos;
-        }
-        if (pos >= lines.size()) {
-            throw std::runtime_error("Bad input");
-        }
-        return trim(lines[pos++]);
-    };
-
+static Request parse_multiline_request(std::istream& in, const std::string& first_line) {
     Request req;
-
-    req.command = to_lower_copy(next_nonempty_line());
+    req.command = to_lower_copy(trim(first_line));
     validate_command(req.command);
 
-    {
-        std::string n_line = next_nonempty_line();
-        std::istringstream ns(n_line);
+    std::string line;
 
+    if (!std::getline(in, line)) {
+        throw std::runtime_error("Bad input");
+    }
+    line = trim(line);
+
+    {
+        std::istringstream ns(line);
         if (!(ns >> req.n) || req.n < 0) {
             throw std::runtime_error("Bad input");
         }
-
         ns >> std::ws;
         if (!ns.eof()) {
             throw std::runtime_error("Bad input");
@@ -194,8 +168,10 @@ static Request parse_multiline_request(const std::string& input) {
     std::set<std::string> used_names;
 
     if (req.n > 0) {
-        std::string names_line = next_nonempty_line();
-        std::istringstream names_in(names_line);
+        if (!std::getline(in, line)) {
+            throw std::runtime_error("Bad input");
+        }
+        std::istringstream names_in(line);
 
         for (int i = 0; i < req.n; ++i) {
             if (!(names_in >> req.names[i])) {
@@ -214,11 +190,11 @@ static Request parse_multiline_request(const std::string& input) {
         if (!names_in.eof()) {
             throw std::runtime_error("Bad input");
         }
-    }
 
-    if (req.n > 0) {
-        std::string values_line = next_nonempty_line();
-        std::istringstream values_in(values_line);
+        if (!std::getline(in, line)) {
+            throw std::runtime_error("Bad input");
+        }
+        std::istringstream values_in(line);
 
         for (int i = 0; i < req.n; ++i) {
             double value;
@@ -234,32 +210,16 @@ static Request parse_multiline_request(const std::string& input) {
         }
     }
 
-    req.expr = next_nonempty_line();
+    if (!std::getline(in, req.expr)) {
+        throw std::runtime_error("Bad input");
+    }
+    req.expr = trim(req.expr);
+
     if (req.expr.empty()) {
         throw std::runtime_error("Bad expression");
     }
 
     return req;
-}
-
-static std::vector<Request> parse_requests(const std::string& input) {
-    if (input.find(';') != std::string::npos) {
-        std::vector<std::string> parts = split_by_semicolon(input);
-        if (parts.empty()) {
-            throw std::runtime_error("Bad input");
-        }
-
-        std::vector<Request> requests;
-        requests.reserve(parts.size());
-
-        for (const std::string& part : parts) {
-            requests.push_back(parse_inline_request(part));
-        }
-
-        return requests;
-    }
-
-    return {parse_multiline_request(input)};
 }
 
 static std::string execute_request(const Request& req) {
@@ -295,26 +255,36 @@ int main() {
     std::cin.tie(nullptr);
 
     try {
-        std::string input(
-            (std::istreambuf_iterator<char>(std::cin)),
-            std::istreambuf_iterator<char>()
-        );
-
-        if (trim(input).empty()) {
+        std::string first_line;
+        if (!std::getline(std::cin, first_line)) {
             throw std::runtime_error("Bad input");
         }
 
-        std::vector<Request> requests = parse_requests(input);
-
-        for (size_t i = 0; i < requests.size(); ++i) {
-            std::cout << execute_request(requests[i]);
-            if (i + 1 < requests.size()) {
-                std::cout << '\n';
-            }
+        first_line = trim(first_line);
+        if (first_line.empty()) {
+            throw std::runtime_error("Bad input");
         }
+
+        // inline-режим: команды через ;
+        if (first_line.find(';') != std::string::npos) {
+            std::vector<std::string> requests = split_by_semicolon(first_line);
+            if (requests.empty()) {
+                throw std::runtime_error("Bad input");
+            }
+
+            for (size_t i = 0; i < requests.size(); ++i) {
+                Request req = parse_inline_request(requests[i]);
+                std::cout << execute_request(req);
+                if (i + 1 < requests.size()) {
+                    std::cout << '\n';
+                }
+            }
+            return 0;
+        }
+
+        // базовый многострочный режим
+        Request req = parse_multiline_request(std::cin, first_line);
+        std::cout << execute_request(req);
     } catch (const std::exception& e) {
         std::cout << "ERROR " << e.what();
     }
-
-    return 0;
-}
