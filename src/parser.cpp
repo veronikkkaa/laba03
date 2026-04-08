@@ -1,6 +1,8 @@
 #include "parser.hpp"
 #include "utils.hpp"
+
 #include <stdexcept>
+#include <string>
 
 Parser::Parser(const std::string& expression, const std::set<std::string>& variables)
     : lexer(expression), allowed_vars(variables) {
@@ -117,7 +119,11 @@ NodePtr Parser::parse_primary() {
         return value;
     }
 
-    throw std::runtime_error("Bad expression");
+    if (current.type == lexem_t::EOEX) {
+        throw std::runtime_error("Unexpected end of expression");
+    }
+
+    throw std::runtime_error("Unexpected token: " + current.value);
 }
 
 NodePtr Parser::parse() {
